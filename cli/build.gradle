@@ -223,17 +223,6 @@ testExecutableJar {
 	}
 }
 
-testVersionCommand {
-	dependsOn jar
-
-	doLast {
-		javaexec {
-			args = [jar.archivePath, "version"]
-			main = "-jar"
-		}
-	}
-}
-
 unzipPortal {
 	dependsOn downloadPortal
 	from zipTree(downloadPortal.dest)
