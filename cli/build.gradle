@@ -172,10 +172,11 @@ sourceSets {
 }
 
 test {
-	dependsOn createToolingZip, createWrapperZip, unzipPortal
+	dependsOn createToolingZip, createWrapperZip, jar, unzipPortal
 
-	systemProperty 'buildDir', "${buildDir}"
-	systemProperty 'liferay.home', "${buildDir}/liferay-ce-portal-7.0-ga4"
+	systemProperty "bladeJarPath", jar.archivePath
+	systemProperty "buildDir", "${buildDir}"
+	systemProperty "liferay.home", "${buildDir}/liferay-ce-portal-7.0-ga4"
 
 	project(':extensions:sample-command').afterEvaluate { project ->
 		dependsOn project.jar
