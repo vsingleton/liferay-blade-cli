@@ -23,6 +23,8 @@ import com.beust.jcommander.ParameterException;
 
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.command.BaseCommand;
+import com.liferay.blade.cli.command.UpdateCommand;
+import com.liferay.blade.cli.command.VersionCommand;
 import com.liferay.blade.cli.util.CombinedClassLoader;
 import com.liferay.blade.cli.util.WorkspaceUtil;
 
@@ -201,6 +203,14 @@ public class BladeCLI implements Runnable {
 			String output = simplifiedUsageString.toString();
 
 			out(output);
+
+			try {
+				updateAvailable();
+			}
+			catch (IOException ioe) {
+				ioe.printStackTrace();
+			}
+
 		}
 	}
 
@@ -331,6 +341,38 @@ public class BladeCLI implements Runnable {
 			_tracer.format("# " + s + "%n", args);
 			_tracer.flush();
 		}
+	}
+
+	public boolean updateAvailable() throws IOException {
+		boolean available = false;
+
+		VersionCommand versionCommand = new VersionCommand(this);
+
+		String bladeCLIVersion = versionCommand.getBladeCLIVersion();
+
+		out("The current version of blade is " + bladeCLIVersion + System.lineSeparator());
+
+		boolean fromSnapshots = bladeCLIVersion.contains("SNAPSHOT");
+
+		String updateVersion = "";
+
+		try {
+			updateVersion = UpdateCommand.getUpdateVersion(fromSnapshots);
+
+			available = UpdateCommand.shouldUpdate(bladeCLIVersion, updateVersion);
+
+			if (available) {
+				out(
+					"Run \'blade update" + (fromSnapshots ? " --snapshots" : "") + "\' to start using " +
+						(fromSnapshots ? "the latest snapshot " : " ") + "version " + updateVersion +
+							System.lineSeparator());
+			}
+		}
+		catch (IOException ioe) {
+			available = false;
+		}
+
+		return available;
 	}
 
 	private static String _extractBasePath(String[] args) {
