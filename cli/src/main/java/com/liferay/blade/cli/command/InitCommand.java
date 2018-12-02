@@ -95,6 +95,10 @@ public class InitCommand extends BaseCommand<InitArgs> {
 			profileName = initArgs.getBuild();
 		}
 
+		if (!"maven".equals(profileName) && !"gradle".equals(profileName)) {
+			bladeCLI.out("WARNING: " + profileName + " is a profileName that does not exist.");
+		}
+
 		boolean mavenBuild = "maven".equals(profileName);
 
 		if (destDir.exists()) {
