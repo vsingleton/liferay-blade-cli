@@ -24,6 +24,7 @@ import com.liferay.blade.cli.BladeTest;
 import com.liferay.blade.cli.BladeTestResults;
 import com.liferay.blade.cli.GradleRunnerUtil;
 import com.liferay.blade.cli.TestUtil;
+import com.liferay.blade.cli.util.BladeUtil;
 import com.liferay.blade.cli.util.FileUtil;
 import com.liferay.blade.cli.util.WorkspaceUtil;
 import com.liferay.project.templates.ProjectTemplates;
@@ -39,6 +40,7 @@ import java.io.Writer;
 import java.nio.file.Paths;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -47,6 +49,7 @@ import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import org.gradle.testkit.runner.BuildTask;
@@ -976,6 +979,71 @@ public class CreateCommandTest {
 	}
 
 	@Test
+	public void testCreateWorkspaceCommaDelimitedModulesDirGradleProject() throws Exception {
+		File tempRoot = temporaryFolder.getRoot();
+
+		File workspace = new File(tempRoot, "workspace");
+
+		_makeWorkspace(workspace);
+
+		String gradleDotProperties = workspace.getAbsolutePath() + "/gradle.properties";
+
+		_checkFileExists(gradleDotProperties);
+
+		if (!BladeUtil.isWindows()) {
+
+			// edit gradle.propeties file in-place
+
+			File gradleDotPropertiesFile = new File(gradleDotProperties);
+
+			List<String> lines = FileUtils.readLines(gradleDotPropertiesFile, "UTF-8");
+
+			LinkedList<String> outLines = new LinkedList<>();
+
+			String modulesFooBar = "modules,foo,bar";
+
+			String template = "rest";
+
+			String project = template + "test";
+
+			for (String line : lines) {
+				if (line.contains("#liferay.workspace.modules.dir=modules")) {
+					line = " liferay.workspace.modules.dir=" + modulesFooBar;
+				}
+
+				outLines.add(line);
+			}
+
+			FileUtils.writeLines(gradleDotPropertiesFile, "UTF-8", outLines);
+
+			String previousDir = System.getProperty("user.dir");
+
+			try {
+				boolean ableToChdir = _setCurrentDirectory(workspace.getAbsolutePath());
+
+				if (ableToChdir) {
+					String[] args = {"create", "-t", template, project};
+
+					_bladeTest.run(args);
+				}
+			}
+			finally {
+				_setCurrentDirectory(previousDir);
+			}
+
+			File fooBarDir = new File(workspace.getAbsolutePath() + "/ " + modulesFooBar);
+
+			Assert.assertFalse(
+				"directory named '" + fooBarDir.getName() + "' should not exist, but it does.", fooBarDir.exists());
+
+			File projectDir = new File(workspace.getAbsolutePath() + "/modules/" + project);
+
+			Assert.assertTrue(
+				"directory named '" + projectDir.getName() + "' should exist, but does not.", projectDir.exists());
+		}
+	}
+
+	@Test
 	public void testCreateWorkspaceGradleExtModule() throws Exception {
 		File tempRoot = temporaryFolder.getRoot();
 
@@ -1651,6 +1719,20 @@ public class CreateCommandTest {
 
 			Assert.assertEquals("7.0", properties.getProperty("liferay.version.default"));
 		}
+	}
+
+	private boolean _setCurrentDirectory(String name) {
+		boolean set = false;
+
+		File directory;
+
+		directory = new File(name).getAbsoluteFile();
+
+		if (directory.exists() || directory.mkdirs()) {
+			set = System.setProperty("user.dir", directory.getAbsolutePath()) != null;
+		}
+
+		return set;
 	}
 
 	private void _testCreateWar(File workspace, String projectType, String projectName) throws Exception {
