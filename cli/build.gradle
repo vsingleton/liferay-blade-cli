@@ -217,6 +217,12 @@ sourceSets {
 	}
 }
 
+release {
+    git {
+	    requireBranch = ''
+	}
+}
+
 test {
 	dependsOn jar, unzipPortal
 
