@@ -16,6 +16,7 @@
 
 package com.liferay.blade.cli;
 
+import com.liferay.blade.cli.BladeTest.BladeTestBuilder;
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.command.BaseCommand;
 
@@ -31,6 +32,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Scanner;
 
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -45,18 +47,35 @@ public class ExtensionsTest {
 
 	@Before
 	public void setUp() throws Exception {
-		_bladeTest = new BladeTest(temporaryFolder.getRoot());
+		BladeTestBuilder bladeTestBuilder = BladeTest.builder();
+
+		_rootDir = temporaryFolder.getRoot();
+
+		_extensionsDir = temporaryFolder.newFolder(".blade", "extensions");
+
+		_extensionsClassLoaderSupplier = new ExtensionsClassLoaderSupplier(_extensionsDir.toPath());
+
+		bladeTestBuilder.setExtensionsDir(_extensionsDir.toPath());
+
+		bladeTestBuilder.setSettingsDir(_rootDir.toPath());
+
+		_bladeTest = bladeTestBuilder.build();
+	}
+
+	@After
+	public void tearDown() throws Exception {
+		_extensionsClassLoaderSupplier.close();
 	}
 
 	@Test
 	public void testArgsSort() throws Exception {
 		String[] args = {"--base", "/foo/bar/dir/", "--flag1", "extension", "install", "/path/to/jar.jar", "--flag2"};
 
-		Map<String, BaseCommand<? extends BaseArgs>> commands;
+		ClassLoader classLoader = _extensionsClassLoaderSupplier.get();
 
-		try (Extensions extensions = new Extensions(_bladeTest.getBladeSettings(), _bladeTest.getExtensionsPath())) {
-			commands = extensions.getCommands();
-		}
+		Extensions extensions = new Extensions(classLoader);
+
+		Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
 
 		String[] sortedArgs = Extensions.sortArgs(commands, args);
 
@@ -72,29 +91,54 @@ public class ExtensionsTest {
 	}
 
 	@Test
+	public void testBadJar() throws Exception {
+		_setupBadExtension();
+
+		String[] args = {"create", "-l"};
+
+		BladeTestResults results = null;
+
+		results = TestUtil.runBlade(_rootDir, _extensionsDir, false, args);
+
+		String output = results.getOutput();
+
+		String errors = results.getErrors();
+
+		boolean commandSuccess = output.contains("Creates a Liferay");
+
+		Assert.assertTrue(commandSuccess);
+
+		boolean errorOccurred = errors.contains("java.lang.NoClassDefFoundError");
+
+		Assert.assertTrue(errorOccurred);
+	}
+
+	@Test
 	public void testLoadCommandsBuiltIn() throws Exception {
-		try (Extensions extensions = new Extensions(_bladeTest.getBladeSettings(), _bladeTest.getExtensionsPath())) {
-			Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
+		ClassLoader classLoader = _extensionsClassLoaderSupplier.get();
 
-			Assert.assertNotNull(commands);
+		Extensions extensions = new Extensions(classLoader);
 
-			Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT, commands.size());
-		}
+		Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
+
+		Assert.assertNotNull(commands);
+
+		Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT, commands.size());
 	}
 
 	@Test
 	public void testLoadCommandsWithCustomExtension() throws Exception {
 		_setupTestExtensions();
 
-		BladeTest bladeTest = new BladeTest(temporaryFolder.getRoot());
+		ClassLoader classLoader = _extensionsClassLoaderSupplier.get();
 
-		try (Extensions extensions = new Extensions(bladeTest.getBladeSettings(), bladeTest.getExtensionsPath())) {
-			Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
+		Extensions extensions = new Extensions(classLoader);
 
-			Assert.assertNotNull(commands);
+		Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
 
-			Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT + 1, commands.size());
-		}
+		Assert.assertNotNull(commands);
+
+		Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT + 1, commands.size());
 	}
 
 	@Test
@@ -103,23 +147,23 @@ public class ExtensionsTest {
 
 		File workspaceDir = temporaryFolder.newFolder("build", "test", "workspace");
 
-		String[] args = {"--base", workspaceDir.getPath(), "init", "-b", "foo"};
+		String[] args = {"--base", workspaceDir.getPath(), "init", "-P", "foo"};
 
-		TestUtil.runBlade(temporaryFolder.getRoot(), args);
+		TestUtil.runBlade(_rootDir, _extensionsDir, args);
 
-		BladeTest bladeTest = new BladeTest(temporaryFolder.getRoot());
-
-		BladeSettings settings = bladeTest.getBladeSettings();
+		BladeSettings settings = _bladeTest.getBladeSettings();
 
 		settings.setProfileName("foo");
 
-		try (Extensions extensions = new Extensions(settings, bladeTest.getExtensionsPath())) {
-			Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands();
+		ClassLoader classLoader = _extensionsClassLoaderSupplier.get();
 
-			Assert.assertNotNull(commands);
+		Extensions extensions = new Extensions(classLoader);
 
-			Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT + 2, commands.size());
-		}
+		Map<String, BaseCommand<? extends BaseArgs>> commands = extensions.getCommands("foo");
+
+		Assert.assertNotNull(commands);
+
+		Assert.assertEquals(commands.toString(), _BUILT_IN_COMMANDS_COUNT + 2, commands.size());
 	}
 
 	@Rule
@@ -155,14 +199,14 @@ public class ExtensionsTest {
 		Assert.assertTrue(Files.exists(sampleJarPath));
 	}
 
+	private void _setupBadExtension() throws Exception {
+		Path extensionsPath = _extensionsDir.toPath();
+
+		_setupTestExtension(extensionsPath, System.getProperty("badCommandJarFile"));
+	}
+
 	private void _setupTestExtensions() throws Exception {
-		File extensionsDir = new File(temporaryFolder.getRoot(), ".blade/extensions");
-
-		extensionsDir.mkdirs();
-
-		Assert.assertTrue("Unable to create test extensions dir.", extensionsDir.exists());
-
-		Path extensionsPath = extensionsDir.toPath();
+		Path extensionsPath = _extensionsDir.toPath();
 
 		_setupTestExtension(extensionsPath, System.getProperty("sampleCommandJarFile"));
 		_setupTestExtension(extensionsPath, System.getProperty("sampleProfileJarFile"));
@@ -172,5 +216,8 @@ public class ExtensionsTest {
 	private static final int _BUILT_IN_COMMANDS_COUNT = _getBuiltInCommandsCount();
 
 	private BladeTest _bladeTest;
+	private ExtensionsClassLoaderSupplier _extensionsClassLoaderSupplier = null;
+	private File _extensionsDir = null;
+	private File _rootDir = null;
 
 }

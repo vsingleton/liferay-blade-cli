@@ -22,7 +22,6 @@ import aQute.bnd.osgi.Jar;
 
 import aQute.lib.io.IO;
 
-import com.liferay.blade.cli.BladeTest;
 import com.liferay.blade.cli.TestUtil;
 import com.liferay.blade.extensions.maven.profile.internal.MavenUtil;
 
@@ -45,7 +44,9 @@ public class CreateCommandMavenTest {
 
 	@Before
 	public void setUp() throws Exception {
-		_bladeTest = new BladeTest(temporaryFolder.getRoot());
+		_rootDir = temporaryFolder.getRoot();
+
+		_extensionsDir = temporaryFolder.newFolder(".blade", "extensions");
 	}
 
 	@Test
@@ -53,11 +54,11 @@ public class CreateCommandMavenTest {
 		File tempRoot = temporaryFolder.getRoot();
 
 		String[] mavenArgs =
-			{"create", "-d", tempRoot.getAbsolutePath(), "-b", "maven", "-t", "activator", "bar-activator"};
+			{"create", "-d", tempRoot.getAbsolutePath(), "-P", "maven", "-t", "activator", "bar-activator"};
 
 		String projectPath = new File(tempRoot, "bar-activator").getAbsolutePath();
 
-		_bladeTest.run(mavenArgs);
+		TestUtil.runBlade(_rootDir, _extensionsDir, mavenArgs);
 
 		_checkMavenBuildFiles(projectPath);
 
@@ -76,11 +77,11 @@ public class CreateCommandMavenTest {
 	public void testCreateApi() throws Exception {
 		File tempRoot = temporaryFolder.getRoot();
 
-		String[] mavenArgs = {"create", "-d", tempRoot.getAbsolutePath(), "-b", "maven", "-t", "api", "foo"};
+		String[] mavenArgs = {"create", "-d", tempRoot.getAbsolutePath(), "-P", "maven", "-t", "api", "foo"};
 
 		String projectPath = new File(tempRoot, "foo").getAbsolutePath();
 
-		_bladeTest.run(mavenArgs);
+		TestUtil.runBlade(_rootDir, _extensionsDir, mavenArgs);
 
 		_checkMavenBuildFiles(projectPath);
 
@@ -108,13 +109,13 @@ public class CreateCommandMavenTest {
 		File tempRoot = temporaryFolder.getRoot();
 
 		String[] mavenArgs = {
-			"create", "-d", tempRoot.getAbsolutePath(), "-b", "maven", "-t", "fragment", "-h", "com.liferay.login.web",
+			"create", "-d", tempRoot.getAbsolutePath(), "-P", "maven", "-t", "fragment", "-h", "com.liferay.login.web",
 			"-H", "1.0.0", "loginHook"
 		};
 
 		String projectPath = new File(tempRoot, "loginHook").getAbsolutePath();
 
-		_bladeTest.run(mavenArgs);
+		TestUtil.runBlade(_rootDir, _extensionsDir, mavenArgs);
 
 		_checkMavenBuildFiles(projectPath);
 
@@ -138,11 +139,40 @@ public class CreateCommandMavenTest {
 	public void testCreateMVCPortlet() throws Exception {
 		File tempRoot = temporaryFolder.getRoot();
 
+		String[] mavenArgs = {"create", "-d", tempRoot.getAbsolutePath(), "-P", "maven", "-t", "mvc-portlet", "foo"};
+
+		String projectPath = new File(tempRoot, "foo").getAbsolutePath();
+
+		TestUtil.runBlade(_rootDir, _extensionsDir, mavenArgs);
+
+		_checkMavenBuildFiles(projectPath);
+
+		_contains(
+			_checkFileExists(projectPath + "/src/main/java/foo/portlet/FooPortlet.java"),
+			".*^public class FooPortlet extends MVCPortlet.*$");
+
+		_checkFileExists(projectPath + "/src/main/resources/META-INF/resources/view.jsp");
+
+		_checkFileExists(projectPath + "/src/main/resources/META-INF/resources/init.jsp");
+
+		TestUtil.updateMavenRepositories(projectPath);
+
+		MavenUtil.executeGoals(projectPath, new String[] {"clean", "package"});
+
+		MavenTestUtil.verifyBuildOutput(projectPath, "foo-1.0.0.jar");
+
+		_verifyImportPackage(new File(projectPath, "target/foo-1.0.0.jar"));
+	}
+
+	@Test
+	public void testCreateMVCPortletLegacyFlag() throws Exception {
+		File tempRoot = temporaryFolder.getRoot();
+
 		String[] mavenArgs = {"create", "-d", tempRoot.getAbsolutePath(), "-b", "maven", "-t", "mvc-portlet", "foo"};
 
 		String projectPath = new File(tempRoot, "foo").getAbsolutePath();
 
-		_bladeTest.run(mavenArgs);
+		TestUtil.runBlade(_rootDir, _extensionsDir, mavenArgs);
 
 		_checkMavenBuildFiles(projectPath);
 
@@ -216,6 +246,7 @@ public class CreateCommandMavenTest {
 		}
 	}
 
-	private BladeTest _bladeTest;
+	private File _extensionsDir = null;
+	private File _rootDir = null;
 
 }

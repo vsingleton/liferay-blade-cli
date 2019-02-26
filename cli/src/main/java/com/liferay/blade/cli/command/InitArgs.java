@@ -25,24 +25,12 @@ import com.beust.jcommander.Parameters;
 @Parameters(commandDescription = "Initializes a new Liferay workspace", commandNames = "init")
 public class InitArgs extends BaseArgs {
 
-	/**
-	 * @deprecated use {@link #getProfileName()} method instead.
-	 */
-	@Deprecated
-	public String getBuild() {
-		return _build;
-	}
-
 	public String getLiferayVersion() {
 		return _liferayVersion;
 	}
 
 	public String getName() {
 		return _name;
-	}
-
-	public String getProfileName() {
-		return _profileName;
 	}
 
 	public boolean isForce() {
@@ -57,14 +45,6 @@ public class InitArgs extends BaseArgs {
 		return _upgrade;
 	}
 
-	/**
-	 * @deprecated use {@link #setProfileName(String)} method instead.
-	 */
-	@Deprecated
-	public void setBuild(String build) {
-		_build = build;
-	}
-
 	public void setForce(boolean force) {
 		_force = force;
 	}
@@ -77,10 +57,6 @@ public class InitArgs extends BaseArgs {
 		_name = name;
 	}
 
-	public void setProfileName(String profileName) {
-		_profileName = profileName;
-	}
-
 	public void setRefresh(boolean refresh) {
 		_refresh = refresh;
 	}
@@ -88,12 +64,6 @@ public class InitArgs extends BaseArgs {
 	public void setUpgrade(boolean upgrade) {
 		_upgrade = upgrade;
 	}
-
-	@Parameter(
-		description = "Specify the build type of liferay workspace. Available options are gradle, maven. (default gradle)",
-		hidden = true, names = {"-b", "--build"}
-	)
-	private String _build = "gradle";
 
 	@Parameter(description = "create anyway if there are files located at target folder", names = {"-f", "--force"})
 	private boolean _force;
@@ -106,12 +76,6 @@ public class InitArgs extends BaseArgs {
 
 	@Parameter(description = "[name]")
 	private String _name;
-
-	@Parameter(
-		description = "Specify the profile to use when creating the new Liferay workspace. (default gradle)",
-		names = {"-p", "--profile-name"}
-	)
-	private String _profileName;
 
 	@Parameter(description = "force to refresh workspace template", names = {"-r", "--refresh"})
 	private boolean _refresh;

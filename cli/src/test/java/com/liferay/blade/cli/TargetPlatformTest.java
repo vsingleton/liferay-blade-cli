@@ -16,8 +16,8 @@
 
 package com.liferay.blade.cli;
 
+import com.liferay.blade.cli.gradle.GradleWorkspaceProvider;
 import com.liferay.blade.cli.util.BladeUtil;
-import com.liferay.blade.cli.util.WorkspaceUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,21 +36,26 @@ import org.junit.rules.TemporaryFolder;
 
 /**
  * @author Haoyi Sun
+ * @author Gregory Amerson
  */
 public class TargetPlatformTest {
 
 	@Before
 	public void setUp() throws Exception {
+		_extensionsDir = temporaryFolder.newFolder(".blade", "extensions");
+
 		_gradleWorkspaceDir = temporaryFolder.newFolder("gradle-workspace");
 
 		_nonGradleWorkspaceDir = temporaryFolder.newFolder("non-gradle-workspace");
 
 		String[] args = {"init", "--base", _gradleWorkspaceDir.getAbsolutePath()};
 
-		TestUtil.runBlade(args);
+		TestUtil.runBlade(_gradleWorkspaceDir, _extensionsDir, args);
 
-		_gradlePropertiesFile = WorkspaceUtil.getGradlePropertiesFile(_gradleWorkspaceDir);
-		_settingsGradleFile = WorkspaceUtil.getSettingGradleFile(_gradleWorkspaceDir);
+		GradleWorkspaceProvider workspaceProviderGradle = new GradleWorkspaceProvider();
+
+		_gradlePropertiesFile = workspaceProviderGradle.getGradlePropertiesFile(_gradleWorkspaceDir);
+		_settingsGradleFile = workspaceProviderGradle.getSettingGradleFile(_gradleWorkspaceDir);
 	}
 
 	@Test
@@ -58,7 +63,7 @@ public class TargetPlatformTest {
 		String[] args =
 			{"--base", _nonGradleWorkspaceDir.getAbsolutePath(), "create", "-t", "activator", "test-project"};
 
-		TestUtil.runBlade(args);
+		TestUtil.runBlade(_nonGradleWorkspaceDir, _extensionsDir, args);
 
 		File projectDir = new File(_nonGradleWorkspaceDir, "test-project");
 
@@ -80,7 +85,7 @@ public class TargetPlatformTest {
 		String[] args =
 			{"--base", _gradleWorkspaceDir.getAbsolutePath(), "create", "-t", "activator", "test-activator"};
 
-		TestUtil.runBlade(args);
+		TestUtil.runBlade(_gradleWorkspaceDir, _extensionsDir, args);
 
 		File modulesDir = new File(_gradleWorkspaceDir, "modules");
 
@@ -103,7 +108,7 @@ public class TargetPlatformTest {
 
 		String[] args = {"--base", _gradleWorkspaceDir.getAbsolutePath(), "create", "-t", "activator", "test-project"};
 
-		new BladeTest().run(args);
+		TestUtil.runBlade(_gradlePropertiesFile, _extensionsDir, args);
 
 		File modulesDir = new File(_gradleWorkspaceDir, "modules");
 
@@ -125,7 +130,7 @@ public class TargetPlatformTest {
 
 		String[] args = {"--base", _gradleWorkspaceDir.getAbsolutePath(), "create", "-t", "activator", "test-project"};
 
-		TestUtil.runBlade(args);
+		TestUtil.runBlade(_gradleWorkspaceDir, _extensionsDir, args);
 
 		File modulesDir = new File(_gradleWorkspaceDir, "modules");
 
@@ -145,7 +150,9 @@ public class TargetPlatformTest {
 	public final TemporaryFolder temporaryFolder = new TemporaryFolder();
 
 	private void _setTargetPlatformVersionProperty(String version) throws IOException {
-		Properties properties = WorkspaceUtil.getGradleProperties(_gradlePropertiesFile);
+		GradleWorkspaceProvider workspaceProviderGradle = new GradleWorkspaceProvider();
+
+		Properties properties = workspaceProviderGradle.getGradleProperties(_gradlePropertiesFile);
 
 		properties.setProperty("liferay.workspace.target.platform.version", version);
 
@@ -157,7 +164,7 @@ public class TargetPlatformTest {
 	private void _setWorkspacePluginVersion(String version) throws IOException {
 		String settingsScript = BladeUtil.read(_settingsGradleFile);
 
-		Matcher matcher = WorkspaceUtil.patternWorkspacePluginVersion.matcher(settingsScript);
+		Matcher matcher = GradleWorkspaceProvider.patternWorkspacePluginVersion.matcher(settingsScript);
 
 		Assert.assertTrue(settingsScript, matcher.matches());
 
@@ -172,6 +179,7 @@ public class TargetPlatformTest {
 		}
 	}
 
+	private File _extensionsDir = null;
 	private File _gradlePropertiesFile = null;
 	private File _gradleWorkspaceDir = null;
 	private File _nonGradleWorkspaceDir = null;

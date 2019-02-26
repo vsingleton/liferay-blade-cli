@@ -17,13 +17,16 @@
 package com.liferay.blade.extensions.maven.profile;
 
 import com.liferay.blade.cli.BladeCLI;
+import com.liferay.blade.cli.WorkspaceProvider;
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.command.BladeProfile;
 import com.liferay.blade.cli.command.CreateArgs;
 import com.liferay.blade.cli.command.CreateCommand;
 import com.liferay.blade.extensions.maven.profile.internal.MavenUtil;
+import com.liferay.project.templates.ProjectTemplatesArgs;
 
 import java.io.File;
+import java.io.IOException;
 
 import java.util.Properties;
 
@@ -45,11 +48,41 @@ public class CreateCommandMaven extends CreateCommand {
 
 	@Override
 	public void execute() throws Exception {
+		BladeCLI bladeCLI = getBladeCLI();
+
 		CreateArgs createArgs = getArgs();
 
-		createArgs.setBuild("maven");
+		File baseDir = new File(createArgs.getBase());
 
-		super.execute();
+		WorkspaceProvider workspaceProvider = bladeCLI.getWorkspaceProvider(baseDir);
+
+		if ((workspaceProvider == null) || workspaceProvider instanceof MavenWorkspaceProvider) {
+			createArgs.setProfileName("maven");
+
+			super.execute();
+		}
+		else {
+			bladeCLI.error("Cannot create maven project here, incompatible workspace profile type.");
+		}
+	}
+
+	@Override
+	public boolean isWorkspace(File dir) {
+		return MavenUtil.isWorkspace(dir);
+	}
+
+	@Override
+	protected ProjectTemplatesArgs getProjectTemplateArgs(
+			CreateArgs createArgs, BladeCLI bladeCLI, String template, String name, File dir)
+		throws IOException {
+
+		ProjectTemplatesArgs projectTemplatesArgs = super.getProjectTemplateArgs(
+			createArgs, bladeCLI, template, name, dir);
+
+		projectTemplatesArgs.setGradle(false);
+		projectTemplatesArgs.setMaven(true);
+
+		return projectTemplatesArgs;
 	}
 
 	@Override

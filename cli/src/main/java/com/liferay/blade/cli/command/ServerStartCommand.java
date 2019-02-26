@@ -19,7 +19,6 @@ package com.liferay.blade.cli.command;
 import com.liferay.blade.cli.BladeCLI;
 import com.liferay.blade.cli.util.BladeUtil;
 
-import java.io.File;
 import java.io.OutputStream;
 
 import java.nio.file.Files;
@@ -32,6 +31,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
+ * @author Christopher Bryan Boyd
  * @author David Truong
  * @author Simon Jiang
  * @author Gregory Amerson
@@ -45,11 +45,7 @@ public class ServerStartCommand extends BaseCommand<ServerStartArgs> {
 	public void execute() throws Exception {
 		BladeCLI bladeCLI = getBladeCLI();
 
-		BaseArgs args = bladeCLI.getArgs();
-
-		File baseDir = new File(args.getBase());
-
-		LocalServer localServer = newLocalServer(baseDir);
+		LocalServer localServer = newLocalServer(bladeCLI);
 
 		Path liferayHomePath = localServer.getLiferayHomePath();
 
@@ -73,23 +69,66 @@ public class ServerStartCommand extends BaseCommand<ServerStartArgs> {
 
 		ServerStartArgs serverStartArgs = getArgs();
 
-		if (serverType.equals("tomcat")) {
-			if (serverStartArgs.isDebug()) {
-				commands.add("jpda");
-				commands.add("start");
-			}
-			else {
-				commands.add("start");
-			}
+		Map<String, String> processBuilderEnvironment = processBuilder.environment();
+
+		boolean tomcat = serverType.equals("tomcat");
+
+		boolean wildfly = false;
+
+		if (serverType.equals("jboss") || serverType.equals("wildfly")) {
+			wildfly = true;
 		}
-		else if (serverType.equals("jboss") || serverType.equals("wildfly")) {
-			if (serverStartArgs.isDebug()) {
-				commands.add("--debug");
+
+		if (tomcat) {
+			commands.add("start");
+		}
+		else if (wildfly) {
+			processBuilderEnvironment.put("LAUNCH_JBOSS_IN_BACKGROUND", "1");
+		}
+
+		if (serverStartArgs.isDebug()) {
+			String optsOriginal = null;
+
+			if (tomcat) {
+				optsOriginal = processBuilderEnvironment.getOrDefault("CATALINA_OPTS", "");
+			}
+			else if (wildfly) {
+				optsOriginal = processBuilderEnvironment.getOrDefault("JAVA_OPTS", "");
 			}
 
-			Map<String, String> environment = processBuilder.environment();
+			if (optsOriginal != null) {
+				StringBuilder opts = new StringBuilder(optsOriginal);
 
-			environment.put("LAUNCH_JBOSS_IN_BACKGROUND", "1");
+				if (opts.length() > 0) {
+					opts.append(" ");
+				}
+
+				String debugPortString = _getDebugPortString(serverType);
+
+				String suspendValue;
+
+				if (serverStartArgs.isSuspend()) {
+					suspendValue = "y";
+				}
+				else {
+					suspendValue = "n";
+				}
+
+				if (tomcat) {
+					opts.append(
+						"-agentlib:jdwp=transport=dt_socket,address=" + debugPortString + ",server=y,suspend=" +
+							suspendValue);
+
+					processBuilderEnvironment.put("JAVA_OPTS", opts.toString());
+				}
+				else if (wildfly) {
+					opts.append(
+						"-Xrunjdwp:transport=dt_socket,address=" + debugPortString + ",server=y,suspend=" +
+							suspendValue);
+
+					processBuilderEnvironment.put("JAVA_OPTS", opts.toString());
+				}
+			}
 		}
 
 		Stream<String> stream = commands.stream();
@@ -113,6 +152,14 @@ public class ServerStartCommand extends BaseCommand<ServerStartArgs> {
 			process.waitFor();
 		}
 		else {
+			if (log.isPresent()) {
+				Path logPath = log.get();
+
+				if (!Files.exists(logPath)) {
+					Files.createFile(logPath);
+				}
+			}
+
 			bladeCLI.out(serverType + " started.");
 		}
 
@@ -135,8 +182,27 @@ public class ServerStartCommand extends BaseCommand<ServerStartArgs> {
 		return ServerStartArgs.class;
 	}
 
-	protected LocalServer newLocalServer(File baseDir) {
-		return new LocalServer(baseDir);
+	protected LocalServer newLocalServer(BladeCLI bladeCLI) {
+		return new LocalServer(bladeCLI);
+	}
+
+	private String _getDebugPortString(String serverType) {
+		ServerStartArgs serverStartArgs = getArgs();
+
+		int debugPort = serverStartArgs.getDebugPort();
+
+		if (debugPort == -1) {
+			if (serverType.equals("tomcat")) {
+				debugPort = 8000;
+			}
+			else if (serverType.equals("jboss") || serverType.equals("wildfly")) {
+				debugPort = 8787;
+			}
+		}
+
+		String debugPortString = String.valueOf(debugPort);
+
+		return debugPortString;
 	}
 
 }

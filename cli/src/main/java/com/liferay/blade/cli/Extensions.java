@@ -21,35 +21,16 @@ import com.beust.jcommander.Parameters;
 
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.command.BaseCommand;
-import com.liferay.blade.cli.command.BladeProfile;
-import com.liferay.blade.cli.util.FileUtil;
-
-import java.io.IOException;
-import java.io.InputStream;
 
 import java.lang.reflect.Field;
-
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URL;
-import java.net.URLClassLoader;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
-import java.util.Properties;
-import java.util.ServiceLoader;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,19 +38,7 @@ import java.util.stream.Stream;
  * @author Christopher Bryan Boyd
  * @author Gregory Amerson
  */
-public class Extensions implements AutoCloseable {
-
-	public static Collection<String> getBladeProfiles(Class<?> commandClass) {
-		return Stream.of(
-			commandClass.getAnnotationsByType(BladeProfile.class)
-		).filter(
-			Objects::nonNull
-		).map(
-			BladeProfile::value
-		).collect(
-			Collectors.toList()
-		);
-	}
+public class Extensions {
 
 	public static Collection<String> getCommandNames(Collection<Class<? extends BaseArgs>> argsClass) {
 		Stream<Class<? extends BaseArgs>> stream = argsClass.stream();
@@ -221,44 +190,20 @@ public class Extensions implements AutoCloseable {
 		return argsList.toArray(new String[0]);
 	}
 
-	public Extensions(BladeSettings bladeSettings, Path extensionsPath) {
-		_bladeSettings = bladeSettings;
-		_extensionsPath = extensionsPath;
-	}
-
-	@Override
-	public void close() throws Exception {
-		if (_serviceLoaderClassLoader != null) {
-			_getServiceClassLoader().close();
-		}
-
-		if ((_tempExtensionsDirectory != null) && Files.exists(_tempExtensionsDirectory)) {
-			try {
-				FileUtil.deleteDirIfExists(_tempExtensionsDirectory);
-			}
-			catch (IOException ioe) {
-			}
-		}
+	public Extensions(ClassLoader classLoader) {
+		_serviceLoaderClassLoader = classLoader;
 	}
 
 	public Map<String, BaseCommand<? extends BaseArgs>> getCommands() throws Exception {
-		String profileName = _bladeSettings.getProfileName();
+		return _getCommands(null);
+	}
+
+	public Map<String, BaseCommand<? extends BaseArgs>> getCommands(String profileName) throws Exception {
+		if (profileName == null) {
+			profileName = "gradle";
+		}
 
 		return _getCommands(profileName);
-	}
-
-	public Path getPath() throws IOException {
-		return _extensionsPath;
-	}
-
-	private static URL _convertUriToUrl(URI uri) {
-		try {
-			return uri.toURL();
-		}
-		catch (MalformedURLException murle) {
-		}
-
-		return null;
 	}
 
 	private static Collection<String> _getFlags(Class<? extends BaseArgs> clazz, boolean withArguments) {
@@ -287,154 +232,17 @@ public class Extensions implements AutoCloseable {
 		return flags;
 	}
 
-	private static URL[] _getJarUrls(Path jarsPath) throws IOException {
-		try (Stream<Path> files = Files.list(jarsPath)) {
-			return files.filter(
-				path -> String.valueOf(
-					path
-				).endsWith(
-					".jar"
-				)
-			).map(
-				Path::toUri
-			).map(
-				Extensions::_convertUriToUrl
-			).filter(
-				url -> url != null
-			).collect(
-				Collectors.toSet()
-			).toArray(
-				new URL[0]
-			);
-		}
-	}
-
-	private void _addCommand(
-			Map<String, BaseCommand<?>> map, BaseCommand<?> baseCommand, Class<? extends BaseArgs> argsClass)
-		throws IllegalAccessException, InstantiationException {
-
-		BaseArgs baseArgs = argsClass.newInstance();
-
-		baseCommand.setArgs(baseArgs);
-
-		Parameters parameters = argsClass.getAnnotation(Parameters.class);
-
-		if (parameters == null) {
-			throw new IllegalArgumentException(
-				"Loaded base command class that does not have a Parameters annotation " + argsClass.getName());
-		}
-
-		String[] commandNames = parameters.commandNames();
-
-		map.putIfAbsent(commandNames[0], baseCommand);
-	}
-
-	private void _extractBladeExtensions(Path extensionsDirectory) throws IOException {
-		try (InputStream inputStream = Extensions.class.getResourceAsStream("/blade-extensions-versions.properties")) {
-			if (inputStream == null) {
-				return;
-			}
-
-			Properties properties = new Properties();
-
-			properties.load(inputStream);
-
-			Set<Object> keySet = properties.keySet();
-
-			ClassLoader classLoader = Extensions.class.getClassLoader();
-
-			for (Object key : keySet) {
-				String extension = key.toString() + "-" + properties.getProperty(key.toString()) + ".jar";
-
-				try (InputStream extensionInputStream = classLoader.getResourceAsStream(extension)) {
-					Path extensionPath = extensionsDirectory.resolve(extension);
-
-					Files.copy(extensionInputStream, extensionPath, StandardCopyOption.REPLACE_EXISTING);
-				}
-			}
-		}
-	}
-
 	private Map<String, BaseCommand<? extends BaseArgs>> _getCommands(String profileName) throws Exception {
 		if (_commands == null) {
-			_commands = new HashMap<>();
+			ClassLoader serviceLoaderClassLoader = _serviceLoaderClassLoader;
 
-			ClassLoader serviceLoaderClassLoader = _getServiceClassLoader();
-
-			@SuppressWarnings("rawtypes")
-			ServiceLoader<BaseCommand> serviceLoader = ServiceLoader.load(BaseCommand.class, serviceLoaderClassLoader);
-
-			Collection<BaseCommand<?>> allCommands = new ArrayList<>();
-
-			for (BaseCommand<?> baseCommand : serviceLoader) {
-				baseCommand.setClassLoader(serviceLoaderClassLoader);
-
-				allCommands.add(baseCommand);
-			}
-
-			Map<String, BaseCommand<?>> map = new HashMap<>();
-
-			Collection<BaseCommand<?>> commandsToRemove = new ArrayList<>();
-
-			if ((profileName != null) && (profileName.length() > 0)) {
-				for (BaseCommand<?> baseCommand : allCommands) {
-					Collection<String> profileNames = getBladeProfiles(baseCommand.getClass());
-
-					Class<? extends BaseArgs> argsClass = baseCommand.getArgsClass();
-
-					if (profileNames.contains(profileName)) {
-						_addCommand(map, baseCommand, argsClass);
-
-						commandsToRemove.add(baseCommand);
-					}
-				}
-			}
-			else {
-				for (BaseCommand<?> baseCommand : allCommands) {
-					Collection<String> profileNames = getBladeProfiles(baseCommand.getClass());
-
-					if ((profileNames != null) && !profileNames.isEmpty()) {
-						commandsToRemove.add(baseCommand);
-					}
-				}
-			}
-
-			allCommands.removeAll(commandsToRemove);
-
-			for (BaseCommand<?> baseCommand : allCommands) {
-				Class<? extends BaseArgs> argsClass = baseCommand.getArgsClass();
-
-				_addCommand(map, baseCommand, argsClass);
-			}
-
-			for (Entry<String, BaseCommand<?>> entry : map.entrySet()) {
-				_commands.put(entry.getKey(), entry.getValue());
-			}
+			_commands = BladeCLI.getCommandMapByClassLoader(profileName, serviceLoaderClassLoader);
 		}
 
 		return _commands;
 	}
 
-	private URLClassLoader _getServiceClassLoader() throws IOException {
-		if (_serviceLoaderClassLoader == null) {
-			_tempExtensionsDirectory = Files.createTempDirectory("extensions");
-
-			FileUtil.copyDir(getPath(), _tempExtensionsDirectory);
-
-			_extractBladeExtensions(_tempExtensionsDirectory);
-
-			URL[] jarUrls = _getJarUrls(_tempExtensionsDirectory);
-
-			_serviceLoaderClassLoader = new URLClassLoader(jarUrls, getClass().getClassLoader());
-		}
-
-		return _serviceLoaderClassLoader;
-	}
-
-	private final BladeSettings _bladeSettings;
 	private Map<String, BaseCommand<? extends BaseArgs>> _commands;
-	private final Path _extensionsPath;
-	private URLClassLoader _serviceLoaderClassLoader = null;
-	private Path _tempExtensionsDirectory;
+	private ClassLoader _serviceLoaderClassLoader = null;
 
 }

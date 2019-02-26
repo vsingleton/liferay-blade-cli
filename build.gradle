@@ -2,7 +2,7 @@ buildscript {
 	dependencies {
 		classpath group: "com.gradle", name: "build-scan-plugin", version: "1.16"
 		classpath group: "com.liferay", name: "com.liferay.gradle.plugins.change.log.builder", version: "1.1.1"
-		classpath group: "com.liferay", name: "com.liferay.gradle.plugins.source.formatter", version: "latest.release"
+		classpath group: "com.liferay", name: "com.liferay.gradle.plugins.source.formatter", version: "2.3.303"
 		classpath group: "nu.studer", name: "gradle-credentials-plugin", version: "1.0.4"
 	}
 
@@ -21,6 +21,7 @@ buildscript {
 
 apply plugin: "com.gradle.build-scan"
 apply plugin: "com.liferay.change.log.builder"
+apply plugin: "com.liferay.source.formatter"
 
 task clean(type:Delete)
 
@@ -35,6 +36,10 @@ buildScan {
 	termsOfServiceAgree = "yes"
 }
 
+checkSourceFormatting {
+	maxLineLength = 120
+}
+
 clean {
 	doFirst {
 		String mavenLocalRepo = System.getProperty("maven.local.repo")
@@ -45,37 +50,30 @@ clean {
 	}
 }
 
+formatSource {
+	maxLineLength = 120
+}
+
+repositories {
+	maven {
+		url "https://repository-cdn.liferay.com/nexus/content/groups/public"
+	}
+}
+
 subprojects {
-	repositories {
-		maven {
-			url "https://repository-cdn.liferay.com/nexus/content/groups/public"
-		}
-	}
-
-	apply plugin: "com.liferay.source.formatter"
-	apply plugin: "nu.studer.credentials"
-
-	checkSourceFormatting {
-		maxLineLength = 120
-	}
-
-	formatSource {
-		maxLineLength = 120
-	}
-
 	group = "com.liferay.blade"
 
 	plugins.withId("java") {
-		repositories {
-			flatDir {
-				dirs "${rootProject.projectDir}/libs"
-			}
+		apply plugin: "com.liferay.source.formatter"
+		apply plugin: "nu.studer.credentials"
 
-			maven {
-				url "https://repository-cdn.liferay.com/nexus/content/groups/public"
-			}
+		checkSourceFormatting {
+			maxLineLength = 120
 		}
 
+		formatSource {
+			maxLineLength = 120
+		}
 		sourceCompatibility = "1.8"
 		targetCompatibility = "1.8"
 	}
@@ -84,20 +82,30 @@ subprojects {
 		publishing {
 			String liferayNexusUsername = credentials.liferayNexusUsername
 			String liferayNexusPassword = credentials.liferayNexusPassword
+
 			String repoName = project.hasProperty("release") ? "liferay-public-releases" : "liferay-public-snapshots"
+			String repoUrl = "https://repository.liferay.com/nexus/content/repositories/" + repoName
+
+			if (project.hasProperty("localNexus")) {
+				liferayNexusUsername = "admin"
+				liferayNexusPassword = "admin123"
+
+				if (project.hasProperty("release")) {
+					repoUrl = "http://localhost:8081/nexus/content/repositories/releases/"
+				}
+				else {
+					repoUrl = "http://localhost:8081/nexus/content/repositories/snapshots/"
+				}
+			}
 
 			repositories {
-				maven {
-					url "$rootProject.projectDir/mavenRepo"
-				}
-
 				maven {
 					credentials {
 						username liferayNexusUsername
 						password liferayNexusPassword
 					}
 
-					url "https://repository.liferay.com/nexus/content/repositories/" + repoName
+					url repoUrl
 				}
 			}
 		}

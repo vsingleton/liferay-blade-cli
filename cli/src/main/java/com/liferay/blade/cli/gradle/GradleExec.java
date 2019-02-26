@@ -21,7 +21,6 @@ import com.liferay.blade.cli.StringConverter;
 import com.liferay.blade.cli.StringPrintStream;
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.util.BladeUtil;
-import com.liferay.blade.cli.util.WorkspaceUtil;
 
 import java.io.File;
 
@@ -32,21 +31,6 @@ import java.util.NoSuchElementException;
  * @author Gregory Amerson
  */
 public class GradleExec {
-
-	public static boolean isGradleProject(File projectDirectory) {
-		File buildGradle;
-
-		if (WorkspaceUtil.isWorkspace(projectDirectory)) {
-			File workspaceDirectory = WorkspaceUtil.getWorkspaceDir(projectDirectory);
-
-			buildGradle = new File(workspaceDirectory, "build.gradle");
-		}
-		else {
-			buildGradle = new File(projectDirectory, "build.gradle");
-		}
-
-		return buildGradle.exists();
-	}
 
 	public GradleExec(BladeCLI blade) {
 		_blade = blade;
@@ -148,7 +132,7 @@ public class GradleExec {
 		File gradlew = BladeUtil.getGradleWrapper(dir);
 		String executable = "gradle";
 
-		if (gradlew == null) {
+		if ((gradlew == null) || !gradlew.exists()) {
 			BaseArgs args = _blade.getArgs();
 
 			File baseDir = new File(args.getBase());
@@ -156,7 +140,7 @@ public class GradleExec {
 			gradlew = BladeUtil.getGradleWrapper(baseDir);
 		}
 
-		if ((gradlew != null) && gradlew.exists()) {
+		if (gradlew != null) {
 			try {
 				if (!gradlew.canExecute()) {
 					gradlew.setExecutable(true);

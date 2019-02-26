@@ -19,14 +19,16 @@ package com.liferay.blade.cli;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.JCommander.Builder;
 import com.beust.jcommander.MissingCommandException;
+import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.Parameters;
 
 import com.liferay.blade.cli.command.BaseArgs;
 import com.liferay.blade.cli.command.BaseCommand;
+import com.liferay.blade.cli.command.BladeProfile;
 import com.liferay.blade.cli.command.UpdateCommand;
 import com.liferay.blade.cli.command.VersionCommand;
 import com.liferay.blade.cli.util.CombinedClassLoader;
-import com.liferay.blade.cli.util.WorkspaceUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,21 +36,32 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 
+import java.lang.reflect.Field;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Formatter;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.ServiceLoader;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.fusesource.jansi.AnsiConsole;
 
@@ -57,6 +70,44 @@ import org.fusesource.jansi.AnsiConsole;
  * @author David Truong
  */
 public class BladeCLI {
+
+	public static Map<String, BaseCommand<? extends BaseArgs>> getCommandMapByClassLoader(
+			String profileName, ClassLoader classLoader)
+		throws IllegalAccessException, InstantiationException {
+
+		Collection<BaseCommand<?>> allCommands = _getCommandsByClassLoader(classLoader);
+
+		Map<String, BaseCommand<?>> commandMap = new HashMap<>();
+
+		Collection<BaseCommand<?>> commandsToRemove = new ArrayList<>();
+
+		boolean profileNameIsPresent = false;
+
+		if ((profileName != null) && (profileName.length() > 0)) {
+			profileNameIsPresent = true;
+		}
+
+		for (BaseCommand<?> baseCommand : allCommands) {
+			Collection<String> profileNames = _getBladeProfiles(baseCommand.getClass());
+
+			if (profileNameIsPresent && profileNames.contains(profileName)) {
+				_addCommand(commandMap, baseCommand);
+
+				commandsToRemove.add(baseCommand);
+			}
+			else if ((profileNames != null) && !profileNames.isEmpty()) {
+				commandsToRemove.add(baseCommand);
+			}
+		}
+
+		allCommands.removeAll(commandsToRemove);
+
+		for (BaseCommand<?> baseCommand : allCommands) {
+			_addCommand(commandMap, baseCommand);
+		}
+
+		return commandMap;
+	}
 
 	public static void main(String[] args) {
 		BladeCLI bladeCLI = new BladeCLI();
@@ -112,10 +163,16 @@ public class BladeCLI {
 	}
 
 	public BladeSettings getBladeSettings() throws IOException {
-		final File settingsFile;
+		File settingsFile = null;
 
-		if (WorkspaceUtil.isWorkspace(this)) {
-			File workspaceDir = WorkspaceUtil.getWorkspaceDir(this);
+		BaseArgs baseArgs = getArgs();
+
+		File baseDir = new File(baseArgs.getBase());
+
+		WorkspaceProvider workspaceProvider = getWorkspaceProvider(baseDir);
+
+		if (workspaceProvider != null) {
+			File workspaceDir = workspaceProvider.getWorkspaceDir(baseDir);
 
 			settingsFile = new File(workspaceDir, ".blade/settings.properties");
 		}
@@ -130,19 +187,58 @@ public class BladeCLI {
 		return _baseCommand;
 	}
 
-	public Path getExtensionsPath() throws IOException {
+	public Extensions getExtensions() {
+		if (_extensions == null) {
+			ClassLoader classLoader = _getClassLoader();
+
+			_extensions = new Extensions(classLoader);
+		}
+
+		return _extensions;
+	}
+
+	public Path getExtensionsPath() {
 		Path userBladePath = _getUserBladePath();
 
 		Path extensions = userBladePath.resolve("extensions");
 
-		if (Files.notExists(extensions)) {
-			Files.createDirectories(extensions);
+		try {
+			if (Files.notExists(extensions)) {
+				Files.createDirectories(extensions);
+			}
+			else if (!Files.isDirectory(extensions)) {
+				throw new IOException(".blade/extensions is not a directory!");
+			}
 		}
-		else if (!Files.isDirectory(extensions)) {
-			throw new IOException(".blade/extensions is not a directory!");
+		catch (IOException ioe) {
+			throw new RuntimeException(ioe);
 		}
 
 		return extensions;
+	}
+
+	public WorkspaceProvider getWorkspaceProvider(File dir) {
+		try {
+			Collection<WorkspaceProvider> providers = _getWorkspaceProviders();
+
+			for (WorkspaceProvider provider : providers) {
+				try {
+					boolean workspace = provider.isWorkspace(dir);
+
+					if (workspace) {
+						return provider;
+					}
+				}
+				catch (Throwable th) {
+					throw new RuntimeException("_getWorkspaceProvider error", th);
+				}
+			}
+		}
+		catch (Throwable th) {
+			throw new RuntimeException("_getWorkspaceProvider error", th);
+		}
+
+		return null;
 	}
 
 	public InputStream in() {
@@ -199,10 +295,7 @@ public class BladeCLI {
 			}
 			else {
 				if (fromSnapshots) {
-					if (UpdateCommand.equal(bladeCLIVersion, updateVersion)) {
-						out(String.format("Already using the latest snapshot version %s.\n", updateVersion));
-					}
-					else {
+					if (!UpdateCommand.equal(bladeCLIVersion, updateVersion)) {
 						out(
 							String.format(
 								"blade version %s is newer than latest snapshot %s; skipping update.\n",
@@ -250,90 +343,92 @@ public class BladeCLI {
 	}
 
 	public void run(String[] args) throws Exception {
-		String basePath = _extractBasePath(args);
+		try {
+			Extensions extensions = getExtensions();
 
-		File baseDir = new File(basePath).getAbsoluteFile();
+			String basePath = _extractBasePath(args);
 
-		_args.setBase(baseDir);
+			String profileName = _extractProfileName(args);
 
-		System.setOut(out());
+			File baseDir = new File(basePath).getAbsoluteFile();
 
-		System.setErr(error());
+			_args.setBase(baseDir);
 
-		BladeSettings bladeSettings = getBladeSettings();
+			System.setOut(out());
 
-		bladeSettings.migrateWorkspaceIfNecessary();
+			System.setErr(error());
 
-		Extensions extensions = new Extensions(bladeSettings, getExtensionsPath());
+			BladeSettings bladeSettings = getBladeSettings();
 
-		_commands = extensions.getCommands();
-
-		args = Extensions.sortArgs(_commands, args);
-
-		Builder builder = JCommander.newBuilder();
-
-		for (Entry<String, BaseCommand<? extends BaseArgs>> e : _commands.entrySet()) {
-			BaseCommand<? extends BaseArgs> value = e.getValue();
-
-			builder.addCommand(e.getKey(), value.getArgs());
-		}
-
-		_jCommander = builder.build();
-
-		if ((args.length == 1) && args[0].equals("--help")) {
-			printUsage();
-		}
-		else {
-			try {
-				_jCommander.parse(args);
-
-				String command = _jCommander.getParsedCommand();
-
-				Map<String, JCommander> jCommands = _jCommander.getCommands();
-
-				JCommander jCommander = jCommands.get(command);
-
-				if (jCommander == null) {
-					printUsage();
-
-					extensions.close();
-
-					return;
-				}
-
-				List<Object> objects = jCommander.getObjects();
-
-				Object commandArgs = objects.get(0);
-
-				_command = command;
-
-				_args = (BaseArgs)commandArgs;
-
-				_args.setBase(baseDir);
-
-				runCommand();
-
-				postRunCommand();
+			if (profileName != null) {
+				bladeSettings.setProfileName(profileName);
 			}
-			catch (MissingCommandException mce) {
-				error("Error");
 
-				StringBuilder stringBuilder = new StringBuilder("0. No such command");
+			bladeSettings.migrateWorkspaceIfNecessary(this);
 
-				for (String arg : args) {
-					stringBuilder.append(" " + arg);
-				}
+			_commands = extensions.getCommands(bladeSettings.getProfileName());
 
-				error(stringBuilder.toString());
+			args = Extensions.sortArgs(_commands, args);
 
+			_jCommander = _buildJCommanderWithCommandMap(_commands);
+
+			if ((args.length == 1) && args[0].equals("--help")) {
 				printUsage();
 			}
-			catch (ParameterException pe) {
-				error(_jCommander.getParsedCommand() + ": " + pe.getMessage());
+			else {
+				try {
+					_jCommander.parse(args);
+
+					String command = _jCommander.getParsedCommand();
+
+					Map<String, JCommander> jCommands = _jCommander.getCommands();
+
+					JCommander jCommander = jCommands.get(command);
+
+					if (jCommander != null) {
+						List<Object> objects = jCommander.getObjects();
+
+						Object commandArgs = objects.get(0);
+
+						_command = command;
+
+						_args = (BaseArgs)commandArgs;
+
+						_args.setProfileName(profileName);
+
+						_args.setBase(baseDir);
+
+						runCommand();
+
+						postRunCommand();
+					}
+					else {
+						printUsage();
+					}
+				}
+				catch (MissingCommandException mce) {
+					error("Error");
+
+					StringBuilder stringBuilder = new StringBuilder("0. No such command");
+
+					for (String arg : args) {
+						stringBuilder.append(" " + arg);
+					}
+
+					error(stringBuilder.toString());
+
+					printUsage();
+				}
+				catch (ParameterException pe) {
+					error(_jCommander.getParsedCommand() + ": " + pe.getMessage());
+				}
 			}
 		}
-
-		extensions.close();
+		finally {
+			if (_extensionsClassLoaderSupplier != null) {
+				_extensionsClassLoaderSupplier.close();
+			}
+		}
 	}
 
 	public void runCommand() {
@@ -382,6 +477,31 @@ public class BladeCLI {
 		}
 	}
 
+	private static void _addCommand(Map<String, BaseCommand<?>> map, BaseCommand<?> baseCommand)
+		throws IllegalAccessException, InstantiationException {
+
+		String[] commandNames = _getCommandNames(baseCommand);
+
+		map.putIfAbsent(commandNames[0], baseCommand);
+	}
+
+	private static JCommander _buildJCommanderWithCommandMap(Map<String, BaseCommand<? extends BaseArgs>> commandMap) {
+		Builder builder = JCommander.newBuilder();
+
+		for (Entry<String, BaseCommand<? extends BaseArgs>> entry : commandMap.entrySet()) {
+			BaseCommand<? extends BaseArgs> value = entry.getValue();
+
+			try {
+				builder.addCommand(entry.getKey(), value.getArgs());
+			}
+			catch (ParameterException pe) {
+				System.err.println(pe.getMessage());
+			}
+		}
+
+		return builder.build();
+	}
+
 	private static String _extractBasePath(String[] args) {
 		String defaultBasePath = ".";
 
@@ -389,7 +509,7 @@ public class BladeCLI {
 			return IntStream.range(
 				0, args.length - 1
 			).filter(
-				i -> args[i].equals("--base") && args.length > (i + 1)
+				i -> args[i].equals("--base") && (args.length > (i + 1))
 			).mapToObj(
 				i -> args[i + 1]
 			).findFirst(
@@ -401,25 +521,212 @@ public class BladeCLI {
 		return defaultBasePath;
 	}
 
+	private static Collection<String> _getBladeProfiles(Class<?> commandClass) {
+		return Stream.of(
+			commandClass.getAnnotationsByType(BladeProfile.class)
+		).filter(
+			Objects::nonNull
+		).map(
+			BladeProfile::value
+		).collect(
+			Collectors.toList()
+		);
+	}
+
+	private static String[] _getCommandNames(BaseCommand<?> baseCommand)
+		throws IllegalAccessException, InstantiationException {
+
+		Class<? extends BaseArgs> baseArgsClass = baseCommand.getArgsClass();
+
+		BaseArgs baseArgs = baseArgsClass.newInstance();
+
+		baseCommand.setArgs(baseArgs);
+
+		Parameters parameters = baseArgsClass.getAnnotation(Parameters.class);
+
+		if (parameters == null) {
+			throw new IllegalArgumentException(
+				"Loaded base command class that does not have a Parameters annotation " + baseArgsClass.getName());
+		}
+
+		return parameters.commandNames();
+	}
+
+	private static String _getCommandProfile(String[] args) throws MissingCommandException {
+		final Collection<String> profileFlags = new HashSet<>();
+
+		try {
+			Field field = BaseArgs.class.getDeclaredField("_profileName");
+
+			Parameter parameters = field.getAnnotation(Parameter.class);
+
+			Collections.addAll(profileFlags, parameters.names());
+		}
+		catch (Exception e) {
+		}
+
+		String profile = null;
+
+		Collection<String> argsCollection = new ArrayList<>();
+
+		for (String arg : args) {
+			String[] argSplit = arg.split(" ");
+
+			for (String argEach : argSplit) {
+				argsCollection.add(argEach);
+			}
+		}
+
+		String[] argsArray = argsCollection.toArray(new String[0]);
+
+		for (int x = 0; x < argsArray.length; x++) {
+			String arg = argsArray[x];
+
+			if (profileFlags.contains(arg)) {
+				profile = argsArray[x + 1];
+
+				break;
+			}
+		}
+
+		return profile;
+	}
+
+	@SuppressWarnings("rawtypes")
+	private static Collection<BaseCommand<?>> _getCommandsByClassLoader(ClassLoader classLoader) {
+		Collection<BaseCommand<?>> allCommands = new ArrayList<>();
+
+		ServiceLoader<BaseCommand> serviceLoader = ServiceLoader.load(BaseCommand.class, classLoader);
+
+		Iterator<BaseCommand> baseCommandIterator = serviceLoader.iterator();
+
+		while (baseCommandIterator.hasNext()) {
+			try {
+				BaseCommand<?> baseCommand = baseCommandIterator.next();
+
+				baseCommand.setClassLoader(classLoader);
+
+				allCommands.add(baseCommand);
+			}
+			catch (Throwable e) {
+				Class<?> throwableClass = e.getClass();
+
+				System.err.println(
+					"Exception thrown while loading extension." + System.lineSeparator() + "Exception: " +
+						throwableClass.getName() + ": " + e.getMessage() + System.lineSeparator());
+
+				Throwable cause = e.getCause();
+
+				if (cause != null) {
+					Class<?> throwableCauseClass = cause.getClass();
+
+					System.err.print(
+						throwableCauseClass.getName() + ": " + cause.getMessage() + System.lineSeparator());
+				}
+			}
+		}
+
+		return allCommands;
+	}
+
+	private String _extractProfileName(String[] args) {
+		List<String> argsList = new ArrayList<>();
+		List<String> originalArgsList = Arrays.asList(args);
+
+		argsList.addAll(originalArgsList);
+
+		for (int x = 0; x < argsList.size(); x++) {
+			String arg = argsList.get(x);
+
+			if (Objects.equals(arg, "--base")) {
+				argsList.remove(x);
+				argsList.remove(x);
+
+				break;
+			}
+		}
+
+		try {
+			return _getCommandProfile(argsList.toArray(new String[0]));
+		}
+		catch (MissingCommandException mce) {
+			error(mce);
+		}
+
+		return null;
+	}
+
+	private ClassLoader _getClassLoader() {
+		if (_extensionsClassLoaderSupplier == null) {
+			_extensionsClassLoaderSupplier = new ExtensionsClassLoaderSupplier(getExtensionsPath());
+		}
+
+		return _extensionsClassLoaderSupplier.get();
+	}
+
 	private Path _getUpdateCheckPath() throws IOException {
 		Path userBladePath = _getUserBladePath();
 
 		return userBladePath.resolve("updateCheck.properties");
 	}
 
-	private Path _getUserBladePath() throws IOException {
+	private Path _getUserBladePath() {
 		Path userHomePath = _USER_HOME_DIR.toPath();
 
 		Path userBladePath = userHomePath.resolve(".blade");
 
-		if (Files.notExists(userBladePath)) {
-			Files.createDirectories(userBladePath);
+		try {
+			if (Files.notExists(userBladePath)) {
+				Files.createDirectories(userBladePath);
+			}
+			else if (!Files.isDirectory(userBladePath)) {
+				throw new IOException(userBladePath + " is not a directory.");
+			}
 		}
-		else if (!Files.isDirectory(userBladePath)) {
-			throw new IOException(userBladePath + " is not a directory.");
+		catch (IOException ioe) {
+			throw new RuntimeException(ioe);
 		}
 
 		return userBladePath;
+	}
+
+	private Collection<WorkspaceProvider> _getWorkspaceProviders() throws Exception {
+		if (_workspaceProviders == null) {
+			_workspaceProviders = new ArrayList<>();
+
+			ClassLoader classLoader = _getClassLoader();
+
+			ServiceLoader<WorkspaceProvider> serviceLoader = ServiceLoader.load(WorkspaceProvider.class, classLoader);
+
+			Iterator<WorkspaceProvider> workspaceProviderIterator = serviceLoader.iterator();
+
+			while (workspaceProviderIterator.hasNext()) {
+				try {
+					WorkspaceProvider workspaceProvider = workspaceProviderIterator.next();
+
+					_workspaceProviders.add(workspaceProvider);
+				}
+				catch (Throwable e) {
+					Class<?> throwableClass = e.getClass();
+
+					System.err.println(
+						"Exception thrown while loading WorkspaceProvider." + System.lineSeparator() + "Exception: " +
+							throwableClass.getName() + ": " + e.getMessage());
+
+					Throwable cause = e.getCause();
+
+					if (cause != null) {
+						Class<?> throwableCauseClass = cause.getClass();
+
+						System.err.print(throwableCauseClass.getName() + ": " + cause.getMessage());
+					}
+				}
+			}
+
+			return _workspaceProviders;
+		}
+
+		return _workspaceProviders;
 	}
 
 	private void _runCommand() throws Exception {
@@ -443,6 +750,10 @@ public class BladeCLI {
 			try {
 				thread.setContextClassLoader(combinedClassLoader);
 
+				if (_args.getProfileName() == null) {
+					_args.setProfileName("gradle");
+				}
+
 				command.execute();
 			}
 			catch (Throwable th) {
@@ -463,6 +774,10 @@ public class BladeCLI {
 
 	private boolean _shouldCheckForUpdates() {
 		try {
+			if (_command.contains("update")) {
+				return false;
+			}
+
 			Path updateCheckPath = _getUpdateCheckPath();
 
 			if (!Files.exists(updateCheckPath)) {
@@ -471,11 +786,9 @@ public class BladeCLI {
 
 			Properties properties = new Properties();
 
-			InputStream inputStream = Files.newInputStream(updateCheckPath);
-
-			properties.load(inputStream);
-
-			inputStream.close();
+			try (InputStream inputStream = Files.newInputStream(updateCheckPath)) {
+				properties.load(inputStream);
+			}
 
 			Instant lastUpdateCheck = Instant.ofEpochMilli(
 				Long.parseLong(properties.getProperty(_LAST_UPDATE_CHECK_KEY)));
@@ -519,8 +832,11 @@ public class BladeCLI {
 	private String _command;
 	private Map<String, BaseCommand<? extends BaseArgs>> _commands;
 	private final PrintStream _error;
+	private Extensions _extensions;
+	private ExtensionsClassLoaderSupplier _extensionsClassLoaderSupplier;
 	private final InputStream _in;
 	private JCommander _jCommander;
 	private final PrintStream _out;
+	private Collection<WorkspaceProvider> _workspaceProviders = null;
 
 }

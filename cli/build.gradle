@@ -4,15 +4,18 @@ buildscript {
 	dependencies {
 		classpath group: "biz.aQute.bnd", name: "biz.aQute.bnd.gradle", version: "3.5.0"
 		classpath group: "de.undercouch", name: "gradle-download-task", version: "3.3.0"
+	    classpath 'net.researchgate:gradle-release:2.6.0'
 	}
 
 	repositories {
 		maven {
 			url "https://repository-cdn.liferay.com/nexus/content/groups/public"
+		    url 'https://plugins.gradle.org/m2/'
 		}
 	}
 }
 
+apply plugin: 'net.researchgate.release'
 apply plugin: "biz.aQute.bnd.builder"
 apply plugin: "java"
 apply plugin: "maven-publish"
@@ -28,6 +31,8 @@ task unzipPortal(type: Copy)
 
 configurations {
 	bladeExtensions {
+		resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+		resolutionStrategy.cacheDynamicVersionsFor 0, 'seconds'
 		transitive = false
 	}
 
@@ -61,11 +66,12 @@ createWrapperZip {
 }
 
 dependencies {
-	bladeExtensions group: "com.liferay.blade", name: "com.liferay.blade.extensions.maven.profile", version: "latest.integration"
+	bladeExtensions group: "com.liferay.blade", name: "com.liferay.blade.extensions.maven.profile", version: "latest.integration", changing: true
 
 	compile group: "biz.aQute.bnd", name: "biz.aQute.bndlib", version: "3.5.0"
 	compile group: "com.liferay", name: "com.liferay.gogo.shell.client", version: "1.0.0"
-	compile group: "com.liferay", name: "com.liferay.project.templates", version: "4.2.4"
+	compile group: "com.liferay", name: "com.liferay.project.templates", version: "4.2.9"
+	compile group: "commons-io", name: "commons-io", version: "2.6"
 	compile group: "org.apache.commons", name: "commons-lang3", version: "3.4"
 	compile group: "org.apache.maven", name: "maven-aether-provider", version: "3.3.9"
 	compile group: "org.apache.maven", name: "maven-settings", version: "3.3.9"
@@ -168,17 +174,33 @@ publishing {
 	}
 }
 
+String repoHost = "repository-cdn.liferay.com"
+
+if (project.hasProperty("release") || project.hasProperty("snapshots")) {
+	repoHost = "repository.liferay.com"
+}
+
 repositories {
+	flatDir {
+		dirs "${rootProject.projectDir}/libs"
+	}
+
+	if (project.hasProperty("localNexus")) {
+		maven {
+			url "http://localhost:8081/nexus/content/groups/public/"
+		}
+	}
+
 	maven {
 		url "https://repo.gradle.org/gradle/libs-releases/"
 	}
 
 	maven {
-		url "https://repository-cdn.liferay.com/nexus/content/repositories/liferay-public-releases/"
+		url "https://${repoHost}/nexus/content/repositories/liferay-public-releases/"
 	}
 
 	maven {
-		url "https://repository-cdn.liferay.com/nexus/content/repositories/liferay-public-snapshots/"
+		url "https://${repoHost}/nexus/content/repositories/liferay-public-snapshots/"
 	}
 }
 
@@ -195,6 +217,12 @@ sourceSets {
 	}
 }
 
+release {
+    git {
+	    requireBranch = ''
+	}
+}
+
 test {
 	dependsOn jar, unzipPortal
 
@@ -203,6 +231,11 @@ test {
 	systemProperty "liferay.home", "${buildDir}/liferay-ce-portal-7.0-ga4"
 	systemProperty "jna.nosys", "true"
 	systemProperty "testOutputPath", sourceSets.test.output.classesDirs.singleFile.absolutePath
+
+	project(":extensions:bad-command").afterEvaluate { project ->
+		dependsOn project.jar
+		systemProperty "badCommandJarFile", project.jar.archivePath
+	}
 
 	project(":extensions:sample-command").afterEvaluate { project ->
 		dependsOn project.jar
@@ -223,7 +256,7 @@ test {
 
 	int forks = 1
 
-	if (!debug) {
+	if (!debug && project.hasProperty("parallel")) {
 		if (availableProcessors > 4) {
 
 			forks = availableProcessors - 2
@@ -243,6 +276,6 @@ unzipPortal {
 	into buildDir
 }
 
-version = "3.4.2-SNAPSHOT"
+version = "3.5.1-SNAPSHOT"
 
 apply from: "blade-jar-smoke-tests.gradle"
