@@ -24,6 +24,13 @@ import com.liferay.blade.cli.util.BladeUtil;
 import com.liferay.project.templates.ProjectTemplates;
 import com.liferay.project.templates.ProjectTemplatesArgs;
 import com.liferay.project.templates.internal.util.FileUtil;
+import org.gradle.internal.impldep.bsh.commands.dir;
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.parser.Parser;
+import org.jsoup.select.Elements;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -36,6 +43,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -47,6 +55,7 @@ import java.util.Set;
 /**
  * @author Gregory Amerson
  * @author Terry Jia
+ * @author Vernon Singleton
  */
 public class InitCommand extends BaseCommand<InitArgs> {
 
@@ -85,6 +94,27 @@ public class InitCommand extends BaseCommand<InitArgs> {
 
 		if (destDir.exists() && !destDir.isDirectory()) {
 			_addError(destDir.getAbsolutePath() + " is not a directory.");
+
+			return;
+		}
+
+		if (initArgs.isListVersions()) {
+
+			String context = "portal";
+			List<String> bomVersions = getBomVersions(context);
+
+			bladeCLI.out("execute: " + context + " ...");
+			for (String version : bomVersions) {
+				bladeCLI.out("execute: version = " + version);
+			}
+
+			context = "dxp";
+			bomVersions = getBomVersions(context);
+
+			bladeCLI.out("execute: " + context + " ...");
+			for (String version : bomVersions) {
+				bladeCLI.out("execute: version = " + version);
+			}
 
 			return;
 		}
@@ -260,6 +290,36 @@ public class InitCommand extends BaseCommand<InitArgs> {
 		getBladeCLI().addErrors("init", Collections.singleton(msg));
 	}
 
+	public static List<String> getBomVersions(String context) throws IOException {
+
+		ArrayList<String> versions = new ArrayList<>();
+
+		String url = _PORTAL_BOM_URL;
+
+		if ("portal".equals(context)) {
+			url = _PORTAL_BOM_URL;
+		}
+
+		if ("dxp".equals(context)) {
+			url = _DXP_BOM_URL;
+		}
+
+		Connection connection = Jsoup.connect(url + "maven-metadata.xml");
+
+		connection = connection.parser(Parser.xmlParser());
+
+		Document document = connection.get();
+
+		Elements versionElements = document.select("version");
+
+		for (Element element : versionElements) {
+			String version = element.text();
+			versions.add(version);
+		}
+
+		return versions;
+	}
+
 	private boolean _isPluginsSDK(File dir) {
 		if ((dir == null) || !dir.exists() || !dir.isDirectory()) {
 			return false;
@@ -386,5 +446,15 @@ public class InitCommand extends BaseCommand<InitArgs> {
 		"app-servers.gradle", "build.gradle", "build-plugins.gradle", "build-themes.gradle", "sdk.gradle",
 		"settings.gradle", "util.gradle", "versions.gradle"
 	};
+
+	private static final String _BASE_CDN_URL = "https://repository-cdn.liferay.com/nexus/content/repositories/";
+
+	private static final String _PORTAL_BOM_CONTEXT = "com/liferay/portal/release.portal.bom/";
+
+	private static final String _DXP_BOM_CONTEXT = "com/liferay/portal/release.dxp.bom/";
+
+	private static final String _PORTAL_BOM_URL = _BASE_CDN_URL + "liferay-public-releases/" + _PORTAL_BOM_CONTEXT;
+
+	private static final String _DXP_BOM_URL = _BASE_CDN_URL + "liferay-public-releases/" + _DXP_BOM_CONTEXT;
 
 }

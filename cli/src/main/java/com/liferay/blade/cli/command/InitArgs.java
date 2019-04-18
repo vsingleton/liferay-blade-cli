@@ -37,6 +37,10 @@ public class InitArgs extends BaseArgs {
 		return _force;
 	}
 
+	public boolean isListVersions() {
+		return _listVersions;
+	}
+
 	public boolean isRefresh() {
 		return _refresh;
 	}
@@ -51,6 +55,10 @@ public class InitArgs extends BaseArgs {
 
 	public void setLiferayVersion(String liferayVersion) {
 		_liferayVersion = liferayVersion;
+	}
+
+	public void setListVersions(boolean listVersions) {
+		_listVersions = listVersions;
 	}
 
 	public void setName(String name) {
@@ -73,6 +81,9 @@ public class InitArgs extends BaseArgs {
 		names = {"-v", "--liferay-version"}
 	)
 	private String _liferayVersion = "7.1";
+
+	@Parameter(description = "list possible versions to use when initializing", names = {"-l", "--list-bom-versions"})
+	private boolean _listVersions;
 
 	@Parameter(description = "[name]")
 	private String _name;
