@@ -557,7 +557,7 @@ public class CreateCommand extends BaseCommand<CreateArgs> {
 		String liferayVersion = workspaceProvider.getLiferayVersion(dir);
 
 		if (liferayVersion == null) {
-			return _promptAndAskUserForLiferayVersion(createArgs, dir);
+			return _promptAndAskUserForLiferayVersion(createArgs, dir, workspaceProvider);
 		}
 
 		return _formatLiferayVersion(liferayVersion);
@@ -588,13 +588,15 @@ public class CreateCommand extends BaseCommand<CreateArgs> {
 		return bladeCLI.isWorkspaceDir(dir);
 	}
 
-	private String _promptAndAskUserForLiferayVersion(CreateArgs createArgs, File dir) {
+	private String _promptAndAskUserForLiferayVersion(
+		CreateArgs createArgs, File dir, WorkspaceProvider workspaceProvider) {
+
 		BladeCLI bladeCLI = getBladeCLI();
 
 		try (CloseShieldInputStream closeShieldInputStream = new CloseShieldInputStream(bladeCLI.in());
 			BufferedReader reader = new BufferedReader(new InputStreamReader(closeShieldInputStream))) {
 
-			System.err.println("Missing liferay.workspace.product on gradle.properties");
+			System.out.println("WARNING: Missing liferay.workspace.product on gradle.properties");
 
 			Map<String, String> possibleWorkspaceValue = _createPossibleWorkspaceValue(
 				BladeUtil.getWorkspaceProductKeys(true));
@@ -609,7 +611,9 @@ public class CreateCommand extends BaseCommand<CreateArgs> {
 
 			ProductInfo productInfo = new ProductInfo((Map<String, String>)productInfoMap.get(productKey));
 
-			BladeUtil.writePropertyValue(new File(dir, "gradle.properties"), "liferay.workspace.product", productKey);
+			BladeUtil.writePropertyValue(
+				new File(workspaceProvider.getWorkspaceDir(dir), "gradle.properties"), "liferay.workspace.product",
+				productKey);
 
 			String formatedTargetPlatformVersion = _formatLiferayVersion(productInfo.getTargetPlatformVersion());
 
@@ -669,7 +673,7 @@ public class CreateCommand extends BaseCommand<CreateArgs> {
 
 			if (!cloudDxpWorkspaceProductVersion.equals(chosenProductKey)) {
 				System.out.println(
-					"WARNING: The version of cloud DXP workspace is not match with your selected version.");
+					"WARNING: The version of cloud DXP workspace does not match with your selected version.");
 			}
 		}
 		catch (Exception exception) {
